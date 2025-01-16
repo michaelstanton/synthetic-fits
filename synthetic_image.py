@@ -380,3 +380,63 @@ def sky_brightness_to_electrons(
 
     return sky_e_per_pixel
 
+# Add a satellite streak to the synthetic image (sub-stepping approach)
+def add_satellite_substepping(
+    image, wcs_obj,
+    start_ra_deg, start_dec_deg,
+    end_ra_deg, end_dec_deg,
+    total_exposure_s,
+    total_satellite_flux,
+    psf_kernel,
+    num_steps=20
+):
+    """
+    Simulate a satellite crossing the field over a single exposure by
+    dividing the exposure into 'num_steps' sub-steps (linear motion).
+    
+    Parameters
+    ----------
+    image : 2D numpy array
+        The synthetic image to add the satellite track to.
+    wcs_obj : astropy.wcs.WCS
+        World Coordinate System object for converting RA/Dec to pixels.
+    start_ra_deg, start_dec_deg : float
+        RA/Dec (in degrees) at exposure start.
+    end_ra_deg, end_dec_deg : float
+        RA/Dec (in degrees) at exposure end.
+    total_exposure_s : float
+        The total exposure duration in seconds (not strictly used here
+        except for reference—if you wanted a time-based brightness model,
+        you could incorporate it).
+    total_satellite_flux : float
+        The total number of electrons the satellite contributes over the
+        full exposure. You can estimate this based on an equivalent magnitude,
+        or pick a flux directly.
+    psf_kernel : 2D numpy array
+        Moffat or Gaussian kernel, normalized to sum=1.
+    num_steps : int
+        How many sub-steps to simulate within the exposure.
+
+    Returns
+    -------
+    image : 2D numpy array
+        The updated image with the satellite track added.
+    """
+    # Flux per sub-step (assuming constant brightness)
+    flux_per_step = total_satellite_flux / num_steps
+    
+    # Linear interpolation of RA/Dec from start -> end
+    ra_values = np.linspace(start_ra_deg, end_ra_deg, num_steps)
+    dec_values = np.linspace(start_dec_deg, end_dec_deg, num_steps)
+
+    for i in range(num_steps):
+        ra_i = ra_values[i]
+        dec_i = dec_values[i]
+        
+        # Convert RA/Dec to pixel coords
+        x_pix, y_pix = wcs_obj.all_world2pix(ra_i, dec_i, 0)
+        
+        # Place sub-step flux with the same PSF
+        add_psf_to_image(image, x_pix, y_pix, flux_per_step, psf_kernel)
+
+    return image
