@@ -80,3 +80,22 @@ class SensorConfig:
         """
         pixel_size_mm = self.pixel_size_um / 1000.0
         return 206265.0 * (pixel_size_mm / telescope_config.focal_length_mm)
+
+    def compute_fov_degrees(self, telescope_config):
+        """
+        Compute the horizontal and vertical field of view in degrees.
+        Uses the small-angle approximation or a more precise geometry formula:
+          FOV (degrees) = 2 * arctan( sensor_size_mm / (2 * focal_length_mm) ) * (180/pi)
+
+        Returns (fov_x_deg, fov_y_deg).
+        """
+        sensor_width_mm = self.sensor_width_px * (self.pixel_size_um / 1000.0)
+        sensor_height_mm = self.sensor_height_px * (self.pixel_size_um / 1000.0)
+
+        fov_x_rad = 2.0 * math.atan(sensor_width_mm / (2.0 * telescope_config.focal_length_mm))
+        fov_y_rad = 2.0 * math.atan(sensor_height_mm / (2.0 * telescope_config.focal_length_mm))
+
+        fov_x_deg = fov_x_rad * (180.0 / math.pi)
+        fov_y_deg = fov_y_rad * (180.0 / math.pi)
+
+        return (fov_x_deg, fov_y_deg)
