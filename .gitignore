@@ -2,5 +2,5 @@ output/
 __pycache__/
 venv/
 de421.bsp
-celestial_equator_band.fits
+celestial_equator_band*.fits
 API Reference — Skyfield documentation.html

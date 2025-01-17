@@ -1,49 +1,51 @@
 import numpy as np
 import astropy.units as u
 from astropy.coordinates import SkyCoord
-from astroquery.vizier import Vizier
 from astropy.wcs import WCS
 from astropy.modeling.models import Gaussian2D, Moffat2D
 from astropy.io import fits
 from skyfield.api import load, wgs84, Star
 from datetime import datetime, timezone, timedelta
+from astropy.table import Table
 
-def get_star_catalog(ra_center, dec_center, radius=0.3, max_mag=16.0):
-    """
-    Query the Gaia EDR3 (or DR3) catalog around a given RA/Dec,
-    returning star positions and magnitudes as an Astropy Table.
-    """
-    center_coord = SkyCoord(ra=ra_center*u.deg, dec=dec_center*u.deg, frame='icrs')
-    Vizier.ROW_LIMIT = -1
-    catalog_id = "I/350/gaiaedr3"
-    query_result = Vizier.query_region(
-        center_coord,
-        radius=radius*u.deg,
-        catalog=catalog_id
-    )
-    if len(query_result) == 0:
-        print("No results found in the given region.")
-        return None
-    data = query_result[0]
-    if "RA_ICRS" in data.colnames:
-        data.rename_column("RA_ICRS", "RA")
-    if "DE_ICRS" in data.colnames:
-        data.rename_column("DE_ICRS", "Dec")
-    if "Gmag" in data.colnames:
-        data.rename_column("Gmag", "Mag")
+def get_star_catalog(ra_center, dec_center, radius=0.3, max_mag=16.0, local_fits_path="celestial_equator_band.fits"):
+    from astropy.table import Table
+    from astropy.coordinates import SkyCoord
+    import astropy.units as u
 
-    desired_cols = ["RA", "Dec", "Mag"]
-    for col in desired_cols:
-        if col not in data.colnames:
-            print(f"Warning: '{col}' column not found in the table.")
-            return None
+    # Load the local FITS-based star catalog
+    local_data = Table.read(local_fits_path)
 
+    # Force columns 'ra' and 'dec' to be unitless, in case the FITS header says 'deg2'
+    local_data['ra'].unit = None
+    local_data['dec'].unit = None
+
+    # Now multiply by degrees explicitly
+    ra_values = local_data['ra'] * u.deg
+    dec_values = local_data['dec'] * u.deg
+
+    # Build sky coords for everything in local catalog
+    star_coords = SkyCoord(ra=ra_values, dec=dec_values)
+
+    # Center coordinate
+    center_coord = SkyCoord(ra=ra_center*u.deg, dec=dec_center*u.deg)
+
+    # Filter by radius
+    sep = center_coord.separation(star_coords).deg
+    mask = (sep <= radius)
+    data = local_data[mask]
+
+    # Rename columns consistently
+    data.rename_column("ra", "RA")
+    data.rename_column("dec", "Dec")
+    data.rename_column("phot_g_mean_mag", "Mag")
+
+    # Filter by magnitude
     if max_mag is not None:
         data = data[data["Mag"] <= max_mag]
 
-    result_table = data[desired_cols]
-    result_table.index = range(len(result_table))
-    return result_table
+    data.index = range(len(data))
+    return data
 
 def build_synthetic_wcs(
     image_width,
@@ -119,14 +121,12 @@ def add_psf_to_image(image, x_star, y_star, flux_electrons, psf_kernel):
     overlap_y_min = max(y_min, 0)
     overlap_x_max = min(x_max, image.shape[1])
     overlap_y_max = min(y_max, image.shape[0])
-    image_slice = (slice(overlap_y_min, overlap_y_max),
-                   slice(overlap_x_min, overlap_x_max))
+    image_slice = (slice(overlap_y_min, overlap_y_max), slice(overlap_x_min, overlap_x_max))
     kernel_x_min = overlap_x_min - x_min
     kernel_y_min = overlap_y_min - y_min
     kernel_x_max = kernel_x_min + (overlap_x_max - overlap_x_min)
     kernel_y_max = kernel_y_min + (overlap_y_max - overlap_y_min)
-    kernel_slice = (slice(kernel_y_min, kernel_y_max),
-                    slice(kernel_x_min, kernel_x_max))
+    kernel_slice = (slice(kernel_y_min, kernel_y_max), slice(kernel_x_min, kernel_x_max))
     image[image_slice] += flux_electrons * psf_kernel[kernel_slice]
     return image
 
