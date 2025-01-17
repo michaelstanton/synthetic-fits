@@ -20,9 +20,11 @@ from astroquery.vizier import Vizier
 from astropy.wcs import WCS
 from astropy.modeling.models import Gaussian2D, Moffat2D
 from astropy.io import fits
+from skyfield.api import load, wgs84, Star
+from datetime import datetime, timezone, timedelta
 
 
-def get_star_catalog(ra_center, dec_center, radius=0.5, max_mag=16.0):
+def get_star_catalog(ra_center, dec_center, radius=0.3, max_mag=16.0):
     """
     Query the Gaia EDR3 (or DR3) catalog around a given RA/Dec,
     returning star positions and magnitudes as an Astropy Table.
@@ -438,5 +440,121 @@ def add_satellite_substepping(
         
         # Place sub-step flux with the same PSF
         add_psf_to_image(image, x_pix, y_pix, flux_per_step, psf_kernel)
+
+    return image
+
+def add_star_trails_skyfield(
+    image,
+    star_catalog,
+    wcs_obj,
+    lat_deg,          # telescope location latitude
+    lon_deg,          # telescope location longitude
+    alt_m,            # altitude in meters
+    start_time,       # Python datetime for exposure start
+    end_time,         # Python datetime for exposure end
+    num_sub_steps,    # how many time slices in the exposure
+    aperture_area,
+    quantum_efficiency,
+    mag_zero_point,
+    psf_kernel,
+    extinction=0.0
+):
+    """
+    Use Skyfield to compute star trails for a fixed telescope on Earth.
+    Each star is placed multiple times (sub-stepping) from start_time to end_time.
+
+    Parameters
+    ----------
+    image : 2D numpy array
+        The image array to which we add star trails.
+    star_catalog : Astropy Table
+        Rows with columns [RA, Dec, Mag], typically ICRS positions from a star catalog.
+    wcs_obj : astropy.wcs.WCS
+        WCS used to convert RA/Dec to pixel coords.
+    lat_deg, lon_deg : float
+        Telescope location in degrees (geodetic).
+    alt_m : float
+        Altitude in meters above sea level.
+    start_time, end_time : datetime
+        Python datetime objects specifying the exposure start and end in UTC.
+    num_sub_steps : int
+        Number of time subdivisions. More steps -> smoother trails, but slower to compute.
+    aperture_area : float
+        Telescope collecting area in cm^2.
+    quantum_efficiency : float
+        Overall QE (0..1).
+    mag_zero_point : float
+        Photometric zero point for converting magnitudes to electron flux.
+    psf_kernel : 2D numpy array
+        A normalized PSF (sum=1).
+    extinction : float, optional
+        Additional magnitude offset for atmospheric extinction, default 0.0.
+
+    Returns
+    -------
+    image : 2D numpy array (modified in place)
+        The updated image with star trails.
+    """
+    from skyfield.api import load, wgs84, Star
+    from synthetic_image import mag_to_flux, add_psf_to_image  # or your local definitions
+
+    # 1) Load ephemeris
+    planets = load('de421.bsp')
+    earth = planets['earth']
+    
+    # 2) Build a Topos from Earth + your site
+    site = earth + wgs84.latlon(lat_deg, lon_deg, elevation_m=alt_m)
+
+    print("site =", site)
+    
+    ts = load.timescale()
+    t0 = ts.from_datetime(start_time)
+    t1 = ts.from_datetime(end_time)
+    time_array = [t0 + (t1 - t0)*frac for frac in np.linspace(0, 1, num_sub_steps)]
+
+    for t in time_array:
+        # format the time as a string
+        print(t.utc_iso())
+
+    print("time_array", time_array)
+
+    # 3. For each star in the catalog, compute sub-step motion
+    for star_row in star_catalog[0:100]:
+        star_ra_deg = star_row['RA']
+        star_dec_deg = star_row['Dec']
+        star_mag = star_row['Mag'] + extinction
+
+        # Build a Skyfield "Star" object from ICRS RA/Dec
+        star_obj = Star(ra_hours=(star_ra_deg/15.0), dec_degrees=star_dec_deg)
+
+        # print(star_obj)
+
+        total_exposure_s = (end_time - start_time).total_seconds()
+
+        # Total flux over entire exposure
+        star_flux_total = mag_to_flux(
+            mag=star_mag,
+            exposure_time=total_exposure_s,
+            aperture_area=aperture_area,
+            quantum_efficiency=quantum_efficiency,
+            mag_zero_point=mag_zero_point
+        )
+        flux_per_step = star_flux_total / num_sub_steps
+
+        # 4. For each sub-step in time, compute the star's apparent RA/Dec
+        for i, t_skyfield in enumerate(time_array):
+            obs = site.at(t_skyfield)   
+            astrometric = obs.observe(star_obj)
+            apparent = astrometric.apparent()
+            ra_app, dec_app, _dist = apparent.radec(epoch=t_skyfield)
+            ra_deg_app = ra_app.hours * 15.0
+            dec_deg_app = dec_app.degrees
+
+            # Convert to pixel
+            x_pix, y_pix = wcs_obj.all_world2pix(ra_deg_app, dec_deg_app, 0)
+            print(f"{i}: RA={ra_deg_app}, Dec={dec_deg_app} => x={x_pix:.2f}, y={y_pix:.2f}")
+
+            # 6. Place fraction of flux in the image at this sub-step
+            add_psf_to_image(image, x_pix, y_pix, flux_per_step, psf_kernel)
 
     return image
