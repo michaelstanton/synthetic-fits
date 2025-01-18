@@ -280,13 +280,17 @@ def add_star_trails_fixed_camera(
     camera_rotation_deg=0.0,
     arcsec_per_pix=1.0,
     alt0=45.0,
-    az0=180.0
+    az0=180.0,
+    apply_refraction=False
 ):
     """
     Simulate star trails for a *fixed* camera that does not track the sky.
     At each sub-step, we compute the star's Alt/Az and convert it to a 
     2D 'camera' coordinate system. Then we add the corresponding flux
     to the image using psf_kernel.
+
+    If apply_refraction=True, use typical atmospheric conditions for refraction.
+    If apply_refraction=False, skip refraction by passing zero temperature/pressure.
 
     If the star is below the horizon (alt_deg < 0), we skip adding it
     to the image (though you can remove that check to visualize if you prefer).
@@ -308,6 +312,8 @@ def add_star_trails_fixed_camera(
     cos_t = math.cos(theta)
     sin_t = math.sin(theta)
 
+    from synthetic_image import mag_to_flux, add_psf_to_image
+
     for star_row in star_catalog:
         star_ra_deg = star_row['RA']
         star_dec_deg = star_row['Dec']
@@ -325,7 +331,14 @@ def add_star_trails_fixed_camera(
         for t_skyfield in time_array:
             obs = site.at(t_skyfield).observe(star_obj)
             app = obs.apparent()
-            alt, az, distance = app.altaz()
+
+            if apply_refraction:
+                # Standard atmospheric refraction
+                alt, az, distance = app.altaz(temperature_C=15.0, pressure_mbar=1013.25)
+            else:
+                # No refraction
+                alt, az, distance = app.altaz(temperature_C=0.0, pressure_mbar=0.0)
+
             alt_deg = alt.degrees
             az_deg = az.degrees
 
