@@ -63,11 +63,10 @@ def build_synthetic_wcs(
       - The image is rotated rotation_degrees degrees clockwise.
     """
     header = fits.Header()
+    # Removed the 'NAXIS', 'NAXIS1', 'NAXIS2' entries to avoid conflicts 
+    # with the primary HDU creation in generate-fits.ipynb.
     refpix_x = image_width / 2.0
     refpix_y = image_height / 2.0
-    header["NAXIS"] = 2
-    header["NAXIS1"] = image_width
-    header["NAXIS2"] = image_height
     header["CRPIX1"] = refpix_x
     header["CRPIX2"] = refpix_y
     header["CRVAL1"] = ra_center
@@ -139,7 +138,8 @@ def make_gaussian_psf(size=21, fwhm=3.0):
     y, x = np.mgrid[0:size, 0:size]
     amp = 1.0
     x0 = y0 = (size - 1) / 2.0
-    sigma = fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    import math
+    sigma = fwhm / (2.0 * math.sqrt(2.0 * math.log(2.0)))
     gauss = Gaussian2D(amp, x0, y0, sigma, sigma)
     psf = gauss(x, y)
     psf /= np.sum(psf)
@@ -152,7 +152,8 @@ def make_moffat_psf(size=21, fwhm=3.0, moffat_alpha=2.5):
     from astropy.modeling.models import Moffat2D
     y, x = np.mgrid[0:size, 0:size]
     x0 = y0 = (size - 1) / 2
-    gamma = fwhm / (2.0 * np.sqrt(2.0**(1.0/moffat_alpha) - 1.0))
+    import math
+    gamma = fwhm / (2.0 * math.sqrt(2.0**(1.0/moffat_alpha) - 1.0))
     moffat_model = Moffat2D(amplitude=1.0, x_0=x0, y_0=y0,
                             gamma=gamma, alpha=moffat_alpha)
     psf = moffat_model(x, y)
@@ -173,11 +174,11 @@ def sky_brightness_to_electrons(
     """
     relative_flux_per_arcsec2 = 10.0 ** (-0.4 * (sky_mag_per_arcsec2 - mag_zero_point))
     pixel_area_arcsec2 = plate_scale_arcsec_per_pix**2
-    relative_flux_per_pixel = relative_flux_per_arcsec2 * pixel_area_arcsec2
     sky_e_per_pixel = (exposure_time
                        * aperture_area
                        * quantum_efficiency
-                       * relative_flux_per_pixel)
+                       * relative_flux_per_arcsec2
+                      )
     return sky_e_per_pixel
 
 def add_satellite_substepping(
@@ -302,9 +303,10 @@ def add_star_trails_fixed_camera(
     total_exposure_s = (end_time - start_time).total_seconds()
 
     # Precompute rotation matrix for camera orientation
-    theta = np.radians(-camera_rotation_deg)
-    cos_t = np.cos(theta)
-    sin_t = np.sin(theta)
+    import math
+    theta = math.radians(-camera_rotation_deg)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
 
     for star_row in star_catalog:
         star_ra_deg = star_row['RA']
