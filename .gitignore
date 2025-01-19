@@ -2,6 +2,6 @@ output/
 __pycache__/
 venv/
 de421.bsp
-celestial_equator_band*.fits
 API Reference — Skyfield documentation.html
-Light_1509.fits
+*.fits
+*.mp4
